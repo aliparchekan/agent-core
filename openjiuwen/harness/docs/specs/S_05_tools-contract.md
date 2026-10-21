@@ -491,7 +491,9 @@ Windows/Linux subagent. See F_22 for rationale and validation boundaries.
    change the host context, cache, provider, permissions or tool catalog.
 2. Targets are immutable host grants, scoped to explicit windows (or explicitly
    authorized launches). Attached sheets follow their shared parent; new modal
-   dialogs require opt-in. Unshared document windows remain excluded.
+   dialogs require opt-in. Transient opening metadata may be observed again only
+   within the original two-second grant deadline, without input replay or an
+   early capture grant. Unshared document windows remain excluded.
 3. An action requires the latest observation token and the owning session. A batch
    contains up to eight actions with native checks between them, stops at changed
    windows/controls, and returns completed-action progress with a final image.

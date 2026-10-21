@@ -6,7 +6,7 @@
 |---|---|
 | Date | 2026-10-21 |
 | Scope | `tools/desktop/`, its unit tests, optional dependencies, S_05 |
-| Test baseline | Python 3.13 offline suite: 959 desktop + 92 CUA passed; one Windows-only CUA test skipped |
+| Test baseline | Python 3.13 offline suite: 963 desktop + 92 CUA passed; one Windows-only CUA test skipped |
 | Refs | #1043 |
 
 ## Background
@@ -31,6 +31,9 @@ contain only approved windows; multi-window observations compose those captures
 on black. Shared attached sheets are allowed; newly opened modal dialogs require
 explicit host opt-in. Other document windows are excluded. Native permission and
 foreground checks run before input. Ambiguous focus fails without guessing.
+Opening-dialog metadata retries use the existing two-second grant deadline rather
+than exhausting the ordinary three capture attempts first. Only observation is
+retried; input is never replayed and no dialog is captured before identity checks pass.
 
 ## Decisions
 
