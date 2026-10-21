@@ -6,8 +6,8 @@
 |---|---|
 | 类型 | spec |
 | 关联模块 | `openjiuwen/harness/tools/`（130 文件）、`openjiuwen/harness/schema/task.py`、`openjiuwen/core/foundation/tool/base.py`（`Tool.render_for_llm`） |
-| 最近一次修订日期 | 2026-10-14 |
-| 关联 feature | `F_04_tool-result-llm-rendering.md`、`F_05_browser-task-integrity.md`、F_12_browser-jev-shared-observation、F_13_browser-local-decision-loop、F_21_cua-desktop-subagent |
+| 最近一次修订日期 | 2026-10-21 |
+| 关联 feature | `F_04_tool-result-llm-rendering.md`、`F_05_browser-task-integrity.md`、F_12_browser-jev-shared-observation、F_13_browser-local-decision-loop、F_21_cua-desktop-subagent、F_22_scoped-macos-desktop-tool |
 
 ## 范围 / 边界
 
@@ -479,3 +479,24 @@ LLM/Jev 共享 local_context，复杂目标复用可选 objective/绑定；普�
   抛 `COMPONENT_TOOL_INIT_FAILED`。后端在第一次工具调用时才构建，pyautogui 在构建时才导入，所以构建
   工具与导入模块都不触碰显示器。输入始终是前台真实输入；所有阻塞调用经 `asyncio.to_thread` 执行。
 - **依赖**：`cua` extra（`pyautogui`、`psutil`；Windows 上 `pygetwindow`，Linux 上 `python-xlib`）。
+
+## Scoped macOS desktop tool
+
+`tools/desktop/` exports `DesktopSettings` and `DirectComputerUseTool`, registered
+explicitly as `computer_use` through `create_deep_agent(tools=[...])` or the existing
+`harness.tool.import` plugin provider. It is separate from `tools/cua/` and its
+Windows/Linux subagent. See F_22 for rationale and validation boundaries.
+
+1. The host model selects actions. The tool makes no model calls and does not
+   change the host context, cache, provider, permissions or tool catalog.
+2. Targets are immutable host grants, scoped to explicit windows (or explicitly
+   authorized launches). Attached sheets follow their shared parent; new modal
+   dialogs require opt-in. Unshared document windows remain excluded.
+3. An action requires the latest observation token and the owning session. A batch
+   contains up to eight actions with native checks between them, stops at changed
+   windows/controls, and returns completed-action progress with a final image.
+4. Worker-side batching and in-memory capture reduce local overhead without caching
+   pixels. Model/provider caching support is unnecessary.
+5. Done, close, deadline, cancellation and host turn-end cleanup fence input and
+   reap owned processes. Standalone callers close explicitly. No other application's
+   process is terminated. Native execution requires an interactive macOS session.
