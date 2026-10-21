@@ -141,18 +141,23 @@ def test_observe_does_not_adopt_modal_without_completed_input(rig):
 
 
 @pytest.mark.parametrize("transient", ["busy", "geometry"])
-def test_brief_ax_busy_during_opening_retries_observation_without_input_replay(rig, monkeypatch, transient):
+@pytest.mark.parametrize("busy_scans", [1, 5, 100])
+def test_brief_ax_busy_during_opening_retries_observation_without_input_replay(rig, monkeypatch, transient, busy_scans):
     observed = rig.observe()
     rig.d._perform_action = Mock(side_effect=lambda _: add_modal(rig))
     rig.act(Action(kind="shortcut", keys=["cmd", "s"]), observed)
     policy = rig.d.navigation.dialogs
     scan = policy.scan
     calls = 0
+    now = [policy.pending["deadline"] - 2]
+    monkeypatch.setattr("openjiuwen.harness.tools.desktop.macos_navigation.time.monotonic", lambda: now[0])
+    monkeypatch.setattr(rig.d._inputs(), "pause", lambda seconds: now.__setitem__(0, now[0] + seconds))
 
     def busy_once(*args):
         nonlocal calls
         calls += 1
-        if calls == 1:
+        if calls <= busy_scans:
+            assert not rig.captures
             policy.scan_failure = (
                 {"reason": "window enumeration unavailable", "ax_failure": ("AXWindows", -25204)}
                 if transient == "busy"
@@ -163,8 +168,14 @@ def test_brief_ax_busy_during_opening_retries_observation_without_input_replay(r
 
     monkeypatch.setattr(policy, "scan", busy_once)
     rig.captures.clear()
+    if busy_scans == 100:
+        with pytest.raises(RuntimeError, match="opening modal window metadata"):
+            rig.observe()
+        assert not rig.captures and not policy.grants and calls < busy_scans
+        rig.d._perform_action.assert_called_once()
+        return
     result = rig.observe()
-    assert calls >= 2 and result.context["active_window_id"] == rig.handle(4)
+    assert calls > busy_scans and result.context["active_window_id"] == rig.handle(4)
     assert 4 in rig.captures
     rig.d._perform_action.assert_called_once()
 
