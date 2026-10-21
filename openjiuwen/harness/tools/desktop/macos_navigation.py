@@ -531,13 +531,17 @@ class MacOSNavigation:
     # pylint: disable-next=inconsistent-return-statements
     def observe(self, *, image_mode="full"):
         """Allow bounded UI animation to settle, restarting only discarded captures."""
-        for attempt in range(3):
+        attempts = 0
+        while True:
             try:
                 return self._observe_once(image_mode=image_mode)
             except ObservationChanged:
-                if attempt == 2:
+                attempts += 1
+                pending = self.dialogs.pending if self.dialogs.waiting_for_metadata else None
+                remaining = max(0, pending["deadline"] - time.monotonic()) if pending else 0
+                if attempts >= 3 and not remaining:
                     raise
-                self.desktop._inputs().pause(0.15)
+                self.desktop._inputs().pause(min(0.15, remaining) if remaining else 0.15)
 
     # Keep sequential native guards and cleanup visible in one operation.
     # pylint: disable-next=too-many-locals,too-many-statements
