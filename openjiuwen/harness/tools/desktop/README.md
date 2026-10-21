@@ -3,6 +3,8 @@
 An optional `computer_use` tool driven by the existing host model. It operates
 explicitly shared windows through a bounded local worker. It complements the
 Windows/Linux `tools/cua/` subagent; neither that subagent nor host internals change.
+The package provides one tool, with optimized execution and batches of up to eight
+actions enabled by default. The host model chooses when to group predictable actions.
 
 ## Install and register
 
@@ -86,7 +88,11 @@ The host still owns consent and permissions for consequential actions. Optional
 `evidence_dir` stores screenshots and trace metadata locally; leave it unset unless
 those contents may be retained.
 
-## Single, batching, optimized
+## Execution defaults and benchmark configurations
+
+Normal integration uses the optimized defaults. Single-action and batching-only
+settings below are comparison baselines and diagnostic/rollback controls for the
+same tool; they are not separate tools to install or register.
 
 | Mode | Settings | Execution and observations |
 |---|---|---|
