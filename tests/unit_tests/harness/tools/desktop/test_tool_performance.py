@@ -129,11 +129,17 @@ def test_compact_render_preserves_content_controls_geometry_and_original_receipt
 
 
 def test_legacy_profile_only_changes_tool_performance_fields(monkeypatch):
-    original = DesktopSettings()
+    original = DesktopSettings(active_window_screenshots=True, observation_settle_seconds=0.25)
     monkeypatch.setenv("DESKTOP_TOOL_PERFORMANCE", "legacy")
     changed = performance_settings(original)
     differences = {k for k, v in original.model_dump().items() if v != changed.model_dump()[k]}
-    assert differences == {"optimized_batches", "capture_backend", "compact_tool_results"}
+    assert differences == {
+        "optimized_batches",
+        "capture_backend",
+        "compact_tool_results",
+        "active_window_screenshots",
+        "observation_settle_seconds",
+    }
     assert original.optimized_batches is True
     monkeypatch.setenv("DESKTOP_TOOL_PERFORMANCE", "unknown")
     with pytest.raises(ValueError):

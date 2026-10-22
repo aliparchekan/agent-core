@@ -64,6 +64,7 @@ class NativeRig:
             enabled=True,
             execution_mode="direct",
             window_navigation=True,
+            active_window_screenshots=False,
             targets=[Target(name="editor", pid=10, window_ids=[1, 2]), Target(name="viewer", pid=20, window_ids=[3])],
         )
         self.d.targets = {t.name: t for t in self.d.settings.targets}
@@ -252,6 +253,130 @@ def test_discovery_returns_duplicate_titles_without_activating(rig):
     assert context.view_window_id is None
     assert context.active_window_id == rig.handle(1)
     assert not rig.posts and not rig.raised
+
+
+def test_active_crop_captures_one_window_and_maps_input_from_crop(rig):
+    rig.d.settings = rig.d.settings.model_copy(update={"active_window_screenshots": True})
+    observed = rig.observe()
+    context = DesktopObservationContext.model_validate_json(json.dumps(observed.context))
+    assert rig.captures == [1]
+    assert len(context.windows) == 3
+    assert context.view_window_id == context.active_window_id == rig.handle(1)
+    assert observed.bounds == (10, 30, 150, 100)
+    assert (observed.width, observed.height) == (150, 100)
+    rig.act(Action(kind="click", x=20, y=20), observed)
+    assert rig.posts[0]["point"] == (30, 50)
+
+
+def test_active_crop_focus_switch_returns_new_geometry_and_rejects_old_token(rig):
+    rig.d.settings = rig.d.settings.model_copy(update={"active_window_screenshots": True})
+    first = rig.observe()
+    rig.act(Action(kind="focus", window_id=rig.handle(3)), first)
+    second = rig.observe()
+    assert second.bounds == (20, 180, 150, 100)
+    assert second.context["view_window_id"] == rig.handle(3)
+    assert rig.captures == [1, 3]
+    with pytest.raises(RuntimeError, match="stale"):
+        rig.act(Action(kind="click", x=20, y=20), first)
+
+
+def test_active_crop_metadata_has_same_geometry_without_capturing(rig):
+    rig.d.settings = rig.d.settings.model_copy(update={"active_window_screenshots": True})
+    rig.d.accessibility = NS(snapshot=Mock(return_value=([], "available")), clear=Mock())
+    full = rig.observe()
+    rig.captures.clear()
+    metadata = rig.d.navigation.observe(image_mode="metadata")
+    assert metadata["bounds"] == full.bounds
+    assert (metadata["width"], metadata["height"]) == (full.width, full.height)
+    assert metadata["context"]["view_window_id"] == full.context["view_window_id"]
+    assert not rig.captures and not metadata["png_b64"]
+
+
+def test_active_crop_without_shared_foreground_keeps_scoped_overview(rig):
+    rig.d.settings = rig.d.settings.model_copy(update={"active_window_screenshots": True})
+    rig.front = 999
+    observed = rig.observe()
+    assert observed.context["view_window_id"] is None
+    assert observed.bounds == (0, 0, 400, 300)
+    assert set(rig.captures) == {1, 2, 3}
+
+
+def test_active_crop_masks_excluded_same_app_surface_and_never_captures_it(rig):
+    rig.d.settings = rig.d.settings.model_copy(update={"active_window_screenshots": True})
+    rig.rows.insert(0, row(99, bounds=(20, 40, 30, 20)))
+    observed = rig.observe()
+    bitmap = Image.open(io.BytesIO(base64.b64decode(observed.png_b64)))
+    assert rig.captures == [1]
+    assert bitmap.getpixel((15, 15)) == (0, 0, 0)
+
+
+def test_active_crop_preserves_shared_sheet_above_focused_parent(rig):
+    rig.d.settings = rig.d.settings.model_copy(update={"active_window_screenshots": True})
+    rig.observe()
+    rig.rows.insert(0, row(5, bounds=(40, 45, 90, 80), title="Save"))
+    rig.roles[5] = "AXSheet"
+    rig.sheets[1] = [5]
+    observed = rig.observe()
+    assert rig.handle(5) in {w["window_id"] for w in observed.context["windows"]}
+    assert observed.context["view_window_id"] is None
+    assert 5 in rig.captures
+
+
+@pytest.mark.parametrize("mode", ["full", "pixels", "metadata"])
+def test_final_observation_settling_keeps_latest_frame_and_skips_intermediates(monkeypatch, mode):
+    clock = [0.0]
+    monkeypatch.setattr("openjiuwen.harness.tools.desktop.macos_navigation.time.monotonic", lambda: clock[0])
+    nav = MacOSNavigation.__new__(MacOSNavigation)
+    nav.desktop = NS(
+        settings=DesktopSettings(observation_settle_seconds=0.25),
+        _inputs=lambda: NS(pause=lambda delay: clock.__setitem__(0, clock[0] + delay)),
+    )
+    frames = []
+
+    def capture(**kwargs):
+        frame = {
+            "image_digest": "changing" if not frames else "stable",
+            "bounds": (0, 0, 20, 20),
+            "context": {"active_window_id": "shared", "windows": []},
+            "performance": {"window_captures": 1},
+            "generation": len(frames) + 1,
+        }
+        frames.append(frame)
+        nav.desktop.last = Observation("", 20, 20, frame["bounds"], "editor", 1, frame["generation"])
+        return frame
+
+    nav._observe_once = capture
+    result = nav.observe(image_mode=mode)
+    assert result is frames[-1]
+    assert len(frames) == (3 if mode == "full" else 1)
+    if mode == "full":
+        assert result["performance"]["settled"]
+        assert result["performance"]["window_captures"] == 3
+
+
+def test_animation_settling_is_bounded_and_never_executes_input(monkeypatch):
+    clock, calls = [0.0], []
+    monkeypatch.setattr("openjiuwen.harness.tools.desktop.macos_navigation.time.monotonic", lambda: clock[0])
+    nav = MacOSNavigation.__new__(MacOSNavigation)
+    nav.desktop = NS(
+        settings=DesktopSettings(observation_settle_seconds=0.1),
+        _inputs=lambda: NS(pause=lambda delay: clock.__setitem__(0, clock[0] + delay)),
+    )
+
+    def capture(**kwargs):
+        calls.append(1)
+        nav.desktop.last = Observation("", 20, 20, (0, 0, 20, 20), "editor", 1, len(calls))
+        return {
+            "image_digest": str(len(calls)),
+            "bounds": (0, 0, 20, 20),
+            "context": {"active_window_id": "shared", "windows": []},
+            "performance": {"window_captures": 1},
+        }
+
+    nav._observe_once = capture
+    result = nav.observe()
+    assert len(calls) == 3 and clock[0] == 0.1
+    assert not result["performance"]["settled"]
 
 
 def test_focus_requires_specific_window_when_target_ambiguous(rig):

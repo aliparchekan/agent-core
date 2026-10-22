@@ -145,7 +145,7 @@ def test_scene_changed_before_input_refreshes_without_replaying_or_losing_grants
     assert result["observations"] == 1 and result["observation"]["png_b64"]
     assert result["observation"]["generation"] > before.generation and not rig.actions
     assert set(rig.d.navigation.catalog.shared) == grants
-    assert "observe again" in result["reason"]
+    assert "observe again only if none was returned" in result["reason"]
     following = run(rig, [dict(kind="type", text="fresh decision")])
     assert following["completed"] == 1 and rig.value == "fresh decision"
 
