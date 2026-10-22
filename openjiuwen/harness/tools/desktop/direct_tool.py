@@ -15,6 +15,8 @@ from .ownership import invocation_owners
 from .schema import DesktopSettings
 
 BATCH_GUIDANCE = (
+    "Use at most {max_batch_actions} actions per batch; split longer sequences across fresh observations. "
+    "Focus a different window in a SEPARATE call, inspect its returned observation, then build the batch. "
     "When batch is advertised, use operation=batch with observation_id and actions=[flat action objects] "
     "for predictable sequences such as click then type then wait, shortcut then type, or type then Save. "
     "Prefer a single batch for final text entry and the known Save shortcut when the same editor remains focused. "
@@ -111,7 +113,11 @@ class DirectComputerUseTool(Tool):
                 description=coordinate_guidance(settings.coordinate_system)
                 + " "
                 + DIRECT_DESCRIPTION
-                + (BATCH_GUIDANCE if settings.max_batch_actions > 1 else ""),
+                + (
+                    BATCH_GUIDANCE.format(max_batch_actions=settings.max_batch_actions)
+                    if settings.max_batch_actions > 1
+                    else ""
+                ),
                 input_params=input_schema(
                     [target.name for target in settings.targets], settings.max_batch_actions, settings.coordinate_system
                 ),
@@ -306,6 +312,18 @@ class DirectComputerUseTool(Tool):
     def render_for_llm(self, output):
         data = output.data or {"status": "rejected", "reason": output.error, "verified": False}
         data = {key: value for key, value in data.items() if key != "multimodal"}
+        context = (data.get("observation") or {}).get("context")
+        if (
+            data.get("closed") is False
+            and isinstance(context, dict)
+            and context.get("windows")
+            and not context.get("active_window_id")
+        ):
+            data["input_instruction"] = (
+                "No shared window has input focus. Call operation=focus with a window_id from "
+                "observation.context.windows as a SEPARATE call, not inside a batch. Inspect its new "
+                "observation before clicking or typing: screenshot coordinates and controls can change."
+            )
         if self.settings.compact_tool_results:
             # Only this result is projected; the host's messages and history are untouched.
             data = {

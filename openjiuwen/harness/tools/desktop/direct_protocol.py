@@ -109,7 +109,9 @@ def input_schema(targets=(), max_batch_actions=8, coordinate_system="pixels"):
                 "required": ["operation"],
                 "additionalProperties": False,
             },
-            "description": "For batch only: predictable serial actions, e.g. click then type, or shortcut then type "
+            "description": f"For batch only: at most {max_batch_actions} predictable serial actions. "
+            "Focus a different window separately and inspect its fresh observation before constructing this batch. "
+            "Examples: click then type, or shortcut then type "
             "then wait. Focus must be first; later clicks need a stable visible AX control. Each action is checked and "
             "validated locally; a fresh final image returns. Stop and inspect partial progress before continuing. "
             "Do not batch decisions that require reading a changed screen. No launch/done/close inside a batch.",
