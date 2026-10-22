@@ -51,6 +51,12 @@ failure during input remains fatal; release/capture failure, identity changes,
 Stop and outside input also retain fail-closed behavior. Reuse a returned fresh
 observation instead of asking for another identical screenshot.
 
+When window-navigation metadata lists shared windows but none is active, the
+model-facing result explicitly requests a separate focus call and inspection of
+the resulting geometry before constructing input. Batch descriptions state the
+configured action limit. These hints address invalid cross-window batches without
+choosing a target, accepting malformed calls, or changing native guards.
+
 ## Rejected alternatives
 
 - Full-desktop capture would expose unshared content.

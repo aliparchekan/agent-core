@@ -501,6 +501,10 @@ and F_24 for exact-point toggle activation.
    Missing or unshared focus at the initial action guard returns a fresh scoped
    observation without closing the session, provided capture and release succeed.
    No input is sent or replayed; the caller must explicitly focus a listed window.
+   Model-facing guidance states the configured batch limit and requests a separate
+   window-focus call when no shared window is active, followed by inspection of its
+   fresh observation. This is a state hint only: no target or input is chosen,
+   and invalid calls still pass through the same rejection and retry limits.
    Focus loss after an action starts, contamination and unverifiable identity
    remain fatal. A fresh returned observation needs no extra observe call.
 4. Worker-side batching and in-memory capture reduce local overhead without caching
