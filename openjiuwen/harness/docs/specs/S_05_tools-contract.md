@@ -6,7 +6,7 @@
 |---|---|
 | 类型 | spec |
 | 关联模块 | `openjiuwen/harness/tools/`（130 文件）、`openjiuwen/harness/schema/task.py`、`openjiuwen/core/foundation/tool/base.py`（`Tool.render_for_llm`） |
-| 最近一次修订日期 | 2026-10-21 |
+| 最近一次修订日期 | 2026-10-22 |
 | 关联 feature | `F_04_tool-result-llm-rendering.md`、`F_05_browser-task-integrity.md`、F_12_browser-jev-shared-observation、F_13_browser-local-decision-loop、F_21_cua-desktop-subagent、F_22_scoped-macos-desktop-tool |
 
 ## 范围 / 边界
@@ -527,3 +527,12 @@ and F_24 for exact-point toggle activation.
    Recheck the original point before activation; never snap to nearby controls or
    infer desired state. Unsupported capability preserves the original physical click.
    An attempted AXPress is never followed by a mouse click or retried on failure.
+
+7. `DesktopSettings.coordinate_system` selects `pixels` (default), `normalized_1`,
+   or `normalized_1000`. The tool advertises the units, rejects values outside the
+   half-open image range, and converts every pointer action to screenshot pixels
+   using its fresh observation before batch binding or native execution. Element
+   bounds and cursor returned to the model use the same units; image dimensions
+   stay pixels and desktop geometry stays explicitly labeled. Session/worker
+   state and traces remain pixels. No value-range or model-name guessing occurs.
+   See F_25 for the configuration and compatibility boundary.

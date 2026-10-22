@@ -67,7 +67,7 @@ SDK plugin/tool contract; old prototype gateway profiles are not accepted here.
   multimodal tool results. The host controls their conversation history.
 - With `active_window_screenshots=True`, an unambiguous active shared window is captured alone at up to
   `screenshot_max_side` pixels. `context.view_window_id` identifies that crop;
-  use its image pixels for input. Other shared windows remain listed for `focus`.
+  use its image coordinates in the configured units for input. Other shared windows remain listed for `focus`.
   With accessibility enabled, a single unmodified left click on a uniquely observed
   checkbox/radio can use native activation when the exact point passes fresh hit
   testing. It never snaps to nearby controls, infers desired state, or retries input.
@@ -148,3 +148,20 @@ focus, cancellation, batching, registration and the real host loop with a fake
 model. They do not post desktop input, call a paid model or prove live WorkSwarm UI
 operation. The deterministic performance tests assert reduced work and equivalent
 results, not wall-clock claims about native applications.
+
+### Model coordinate conventions
+
+Configure `DesktopSettings(coordinate_system="normalized_1000")` once for a
+vision endpoint using a 1000-unit grid. `normalized_1` supports fractional
+coordinates; the default `pixels` preserves existing integrations. No model-name
+lookup or numeric-range guessing occurs. End users do not normalize coordinates.
+
+The tool advertises units in its function schema and observations. Coordinates
+are relative to the latest returned image (including a window crop), with both
+normalized axes in `[0, scale)`: the upper edge is excluded. Control bounds and
+cursor use the same units; image width/height remain pixels. `desktop_bounds` and
+context `desktop_rect` retain desktop geometry, not input coordinates. All pointer
+actions, drag paths and batches convert once to pixels after ownership/freshness
+validation, before existing native scope checks. Worker state and traces remain
+pixels. Element IDs and keyboard/text input do not need conversion. Choosing a
+coordinate convention does not establish a model's vision or task accuracy.
