@@ -65,7 +65,29 @@ SDK plugin/tool contract; old prototype gateway profiles are not accepted here.
 - Start with `operation="observe"`. Every native action uses the latest returned
   `observation_id`. Actions return a fresh image and receipt through normal SDK
   multimodal tool results. The host controls their conversation history.
+- With `active_window_screenshots=True`, an unambiguous active shared window is captured alone at up to
+  `screenshot_max_side` pixels. `context.view_window_id` identifies that crop;
+  use its image pixels for input. Other shared windows remain listed for `focus`.
+  With accessibility enabled, a single unmodified left click on a uniquely observed
+  checkbox/radio can use native activation when the exact point passes fresh hit
+  testing. It never snaps to nearby controls, infers desired state, or retries input.
+  Unsupported native activation keeps the original physical click.
+  After focus loss, the last active window remains the crop while it is still
+  shared. `context.active_window_id` becomes null: visible pixels do not authorize
+  input. With no retained shared window, or a shared sheet/window overlapping it
+  from above, the tool returns the masked display overview.
+  Set `active_window_screenshots=False` to use that overview on every observation.
+- Optional `observation_settle_seconds=0.25` polls only final full screenshots for
+  two matching frames, within a bounded interval (at most 0.5 seconds configured).
+  It can avoid showing a transient animation to the model. It does not prove task
+  completion or add waits between characters. Both new observation options are
+  disabled by default; enable them explicitly when evaluating model behavior.
 - `focus` selects an approved target/window or an observed editable control.
+  Missing/unshared focus at the initial input guard returns a fresh observation
+  and keeps the session open for explicit refocusing. No action is replayed.
+  Use that returned observation directly; an extra `observe` call is unnecessary.
+  Focus loss after input starts, outside input, and release/capture failures still
+  stop the session.
   Click, type, shortcut, scroll, move, drag and bounded holds use native input.
   `type` sends a whole text string in one tool invocation, even in single mode.
 - Targets may use exact window IDs, or a unique exact window title plus PID/bundle.
@@ -107,7 +129,8 @@ progress reported and no automatic replay. Launch is separate. Later clicks requ
 stable, uniquely identified accessibility controls.
 
 The `DESKTOP_TOOL_PERFORMANCE=legacy` rollback switch disables optimized batching,
-in-memory capture and compact results; it preserves the configured batch size.
+in-memory capture, compact results, active-window crops and final-frame settling;
+it preserves the configured batch size.
 Leave it unset to use explicit settings. The tool makes zero model calls, supplies
 no provider-specific cache parameters, and works regardless of model cache support.
 These options reduce local work; live speed also depends on model calls, app latency
