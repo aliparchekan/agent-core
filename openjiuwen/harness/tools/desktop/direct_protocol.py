@@ -1,5 +1,6 @@
 """Task-independent direct tool schema and strict call decoding; no execution."""
 
+from .coordinates import coordinate_guidance
 from .direct_wait import ReadinessWait
 from .schema import ACTION_FIELDS, Action
 from .shortcuts import SHORTCUT_GUIDANCE
@@ -12,7 +13,7 @@ CALL_GUIDANCE = (
     "focus must be first; later clicks require a stable visible accessibility control. "
     "For native input, include the exact latest observation_id. Put the operation's fields beside operation: "
     "type needs text; click needs element_id OR x and y, with optional button/click_count; "
-    "move needs x/y; drag needs path pixel pairs and optional button/duration; hold_mouse needs x/y; "
+    "move needs x/y; drag needs path coordinate pairs and optional button/duration; hold_mouse needs x/y; "
     "launch needs an approved target; focus needs target OR window_id OR element_id; shortcut/hold_key need keys; "
     "holds use duration=0.05..2 seconds and always release before returning; "
     "mouse actions accept optional modifiers; "
@@ -22,7 +23,7 @@ CALL_GUIDANCE = (
 )
 
 
-def input_schema(targets=(), max_batch_actions=8):
+def input_schema(targets=(), max_batch_actions=8, coordinate_system="pixels"):
     """Expose the simpler flat protocol while reusing the executor's field bounds."""
     fields = Action.model_json_schema()["properties"]
     properties = {
@@ -55,14 +56,14 @@ def input_schema(targets=(), max_batch_actions=8):
         'Use e.g. ["shift"] for selection; all are released before returning.'
     )
     properties["path"]["description"] = (
-        "For drag: 2-64 [x,y] pairs in the latest screenshot, from start through end. "
+        coordinate_guidance(coordinate_system) + " For drag: 2-64 [x,y] pairs, from start through end. "
         "All points must stay on permitted surfaces and pass native input-recipient checks; "
         "do not supply x/y or element_id."
     )
     properties["duration"]["description"] = "For drag/hold_mouse/hold_key: duration in seconds, 0.05-2."
     for axis in ("x", "y"):
         properties[axis]["description"] = (
-            "Screenshot pixels for move/click/hold_mouse, or scroll at this pane. "
+            coordinate_guidance(coordinate_system) + " For move/click/hold_mouse, or scroll at this pane. "
             "For scroll omit both x/y to use the window center."
         )
     properties["text"]["description"] = (

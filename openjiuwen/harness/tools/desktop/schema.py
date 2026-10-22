@@ -176,6 +176,7 @@ class DesktopSettings(StrictModel):
     execution_mode: Literal["direct"] = "direct"
     targets: list[Target] = Field(default_factory=list, max_length=8)
     budgets: Budgets = Field(default_factory=Budgets)
+    coordinate_system: Literal["pixels", "normalized_1", "normalized_1000"] = "pixels"
     screenshot_max_side: int = Field(default=1280, ge=320, le=1600)
     evidence_dir: str | None = None
     display_id: int | None = Field(default=None, gt=0)

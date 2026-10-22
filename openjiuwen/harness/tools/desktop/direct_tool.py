@@ -6,6 +6,7 @@ import json
 from openjiuwen.core.foundation.tool import Tool, ToolCard, ToolExposure
 from openjiuwen.core.foundation.tool.schema import ToolOutput
 
+from .coordinates import coordinate_guidance, pixel_action, project_observation
 from .direct import DirectDesktopSession
 from .direct_completion import install_completion_guard
 from .direct_protocol import CALL_GUIDANCE, decode_call, input_schema
@@ -49,7 +50,7 @@ DIRECT_DESCRIPTION = (
     "If your intended editor is not ready and has editable=true and focusable=true, use focus with its element_id "
     "to request keyboard focus, even if actionable=false. This requires its shared window already be foreground; "
     "focus the window first if needed. Inspect typing_ready in the returned observation before typing. "
-    "Otherwise use screenshot pixels on a clearly visible control or text, or keyboard navigation. "
+    "Otherwise use screenshot coordinates on a clearly visible control or text, or keyboard navigation. "
     "After a rejected click, use the returned fresh observation to choose another verified target "
     "or keyboard navigation. "
     "Call observe only if no fresh observation was returned; do not repeat the rejected ID or point. "
@@ -57,17 +58,17 @@ DIRECT_DESCRIPTION = (
     "The model cannot expand sharing. If a needed window is absent, ask the user to share it in the host. "
     "A screenshot with context.view_window_id shows only that shared window; other shared windows "
     "remain listed for focus. The crop can remain visible after focus loss; only active_window_id indicates focus. "
-    "Use pixels of the latest image, not desktop points or normalized coordinates. "
+    "Use the advertised coordinate_system of the latest image, never desktop points. "
     "An unmodified single left click on a verified native checkbox/radio may use its native press action; "
     "the exact point must hit that observed control. No nearby target is guessed. "
     "Without a view_window_id, the screenshot composes shared windows at their display positions on black. "
     "They can show app content behind unrelated windows. Focus the intended window before input; "
     "the tool separately checks which app would receive each click. Click supports button=left/right/middle "
-    "and click_count=1/2/3. Move uses x/y without clicking. Drag uses a bounded path of [x,y] screenshot-pixel pairs. "
+    "and click_count=1/2/3. Move uses x/y without clicking. Drag uses a bounded path of [x,y] coordinate pairs. "
     "Move/click/drag/scroll/hold_mouse accept modifiers=[cmd,ctrl,alt,shift] as needed. "
     "Hold_key takes keys; hold_mouse takes x/y and button. Both hold for duration=0.05-2 seconds, then release. "
     "Every gesture releases its keys/buttons before returning; held state never carries across calls. "
-    "Observation cursor is screenshot x/y when over an authorized surface, otherwise null. "
+    "Observation cursor uses the advertised coordinate_system when over an authorized surface, otherwise null. "
     "Scroll can target a pane with x/y. Copy requested text exactly, including punctuation "
     "and line breaks. Where editors expose separate paragraph AXTextArea elements, type one paragraph "
     "per action (a final newline is allowed), then use the fresh observation before the next paragraph. "
@@ -107,8 +108,13 @@ class DirectComputerUseTool(Tool):
                 exposure=ToolExposure.DIRECT,
                 parallel_safe=False,
                 idempotent=False,
-                description=DIRECT_DESCRIPTION + (BATCH_GUIDANCE if settings.max_batch_actions > 1 else ""),
-                input_params=input_schema([target.name for target in settings.targets], settings.max_batch_actions),
+                description=coordinate_guidance(settings.coordinate_system)
+                + " "
+                + DIRECT_DESCRIPTION
+                + (BATCH_GUIDANCE if settings.max_batch_actions > 1 else ""),
+                input_params=input_schema(
+                    [target.name for target in settings.targets], settings.max_batch_actions, settings.coordinate_system
+                ),
             )
         )
         self.settings = settings
@@ -214,6 +220,11 @@ class DirectComputerUseTool(Tool):
                             w["window_id"] for w in windows
                         }:
                             raise ValueError("unknown window_id; use a handle from the latest navigation observation")
+                if actions:
+                    actions = [
+                        pixel_action(item, state.observation, self.settings.coordinate_system) for item in actions
+                    ]
+                    action = actions if operation == "batch" else actions[0]
                 if operation == "batch":
                     if state.steps + len(actions) > self.settings.budgets.max_steps:
                         raise ValueError("batch exceeds remaining native action budget; no input executed")
@@ -241,6 +252,8 @@ class DirectComputerUseTool(Tool):
                     data = await state.execute(
                         operation, action=action, release_after=inputs.get("release_after", False)
                     )
+                if "observation" in data:
+                    data["observation"] = project_observation(data["observation"], self.settings.coordinate_system)
                 data["available_targets"] = [
                     {
                         "name": target.name,
