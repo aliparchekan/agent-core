@@ -14,6 +14,8 @@ def performance_settings(settings):
                 "optimized_batches": False,
                 "capture_backend": "screencapture",
                 "compact_tool_results": False,
+                "active_window_screenshots": False,
+                "observation_settle_seconds": 0,
             }
         )
     raise ValueError("DESKTOP_TOOL_PERFORMANCE must be optimized or legacy")

@@ -48,7 +48,10 @@ class ScreenshotGeometry(_Contract):
         if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in (x, y)):
             raise ValueError("screenshot coordinates must be numbers")
         if not (0 <= x < self.pixel_width and 0 <= y < self.pixel_height):
-            raise ValueError("point is outside the screenshot")
+            raise ValueError(
+                f"point is outside the screenshot: use pixel x in [0, {self.pixel_width}) "
+                f"and y in [0, {self.pixel_height}); not desktop points or normalized coordinates"
+            )
         rect = self.desktop_rect
         # Divide first so a valid large coordinate does not overflow during scaling.
         return rect.x + (x / self.pixel_width) * rect.width, rect.y + (y / self.pixel_height) * rect.height

@@ -457,18 +457,38 @@ class AccessibilityTree:
         if not self.belongs(current) or not self.editable(element, role) or self.read_failed:
             raise RuntimeError("accessibility focus is no longer editable")
 
-    def resolve(self, identifier, observation):
-        """Return a verified physical center; failures occur before native input."""
+    def toggle_at_point(self, observation, x, y):
+        """Bind only an exact observed/native hit, never a nearby toggle."""
+        candidates = [
+            item
+            for item in observation.elements
+            if item.get("enabled")
+            and item.get("actionable")
+            and len(item.get("bounds", ())) == 4
+            and item["bounds"][0] <= x < item["bounds"][0] + item["bounds"][2]
+            and item["bounds"][1] <= y < item["bounds"][1] + item["bounds"][3]
+        ]
+        if len(candidates) != 1 or candidates[0].get("role") not in TOGGLE_ROLES:
+            return None
+        identifier = candidates[0]["id"]
+        self.read_failed = False
+        element, _, _ = self.validate_reference(identifier, observation)
+        return identifier if self.point_hits(element, observation.point(x, y)) else None
+
+    def resolve(self, identifier, observation, *, point=None):
+        """Return the verified requested point or center before native input."""
         self.read_failed = False
         element, bounds, _ = self.validate_reference(identifier, observation)
-        point = (bounds[0] + bounds[2] / 2, bounds[1] + bounds[3] / 2)
-        if self.center_hits(element, bounds) and not self.read_failed:
+        if point is None:
+            point = (bounds[0] + bounds[2] / 2, bounds[1] + bounds[3] / 2)
+        inside = bounds[0] <= point[0] < bounds[0] + bounds[2] and bounds[1] <= point[1] < bounds[1] + bounds[3]
+        if inside and self.point_hits(element, point) and not self.read_failed:
             return point
-        raise RuntimeError("accessibility element center is occluded or replaced")
+        raise RuntimeError("accessibility element point is occluded or replaced")
 
     # Keep sequential native guards and cleanup visible in one operation.
     # pylint: disable-next=too-many-locals,too-many-return-statements,too-many-statements
-    def press_toggle(self, identifier, observation, *, guard_point, record=None, deadline=None):
+    def press_toggle(self, identifier, observation, *, guard_point, record=None, deadline=None, point=None):
         """Activate an explicitly selected toggle once, only with native capability."""
         reference = self.references.get(identifier)
         if reference is not None and reference[2] not in TOGGLE_ROLES:
@@ -479,7 +499,7 @@ class AccessibilityTree:
         perform = getattr(self.ax, "AXUIElementPerformAction", None)
         if not callable(query) or not callable(perform):
             return False
-        point = self.resolve(identifier, observation)
+        point = self.resolve(identifier, observation, point=point)
         guard_point(point)
         error, actions = query(element, None)
         if error in (-25205, -25212):
@@ -490,7 +510,7 @@ class AccessibilityTree:
             return False
         # Capability lookup may block while UI state changes. Resolve again, then
         # use the physical recipient/Stop guard even though no mouse pair is sent.
-        point = self.resolve(identifier, observation)
+        point = self.resolve(identifier, observation, point=point)
         if not self.safe_ancestry(element, visible=True) or self.read_failed:
             raise RuntimeError("accessibility toggle is no longer visible")
         guard_point(point)
@@ -535,7 +555,7 @@ class AccessibilityTree:
                 self.validate_reference(identifier, observation, expected_toggle_state=expected)
                 if (
                     not self.safe_ancestry(element, visible=True)
-                    or not self.center_hits(element, reference[1])
+                    or not self.point_hits(element, point)
                     or self.read_failed
                 ):
                     raise RuntimeError("native toggle timeout target could not be verified")
@@ -638,7 +658,10 @@ class AccessibilityTree:
 
     def center_hits(self, element, bounds):
         """Check native hit ownership without correcting questionable AX coordinates."""
-        point = (bounds[0] + bounds[2] / 2, bounds[1] + bounds[3] / 2)
+        return self.point_hits(element, (bounds[0] + bounds[2] / 2, bounds[1] + bounds[3] / 2))
+
+    def point_hits(self, element, point):
+        """Prove native ownership at the exact point, including safe label children."""
         system = self.ax.AXUIElementCreateSystemWide()
         if self.ax.AXUIElementSetMessagingTimeout(system, 0.1) != 0:
             return False
@@ -652,6 +675,8 @@ class AccessibilityTree:
                 break
             if self.equal(current, element):
                 return not self.read_failed
+            if self.attr(current, "AXRole") in CLICK_ROLES:
+                break  # A nested action is a different recipient, not a label.
             if self.equal(current, self.root):
                 break
             current = self.attr(current, "AXParent")

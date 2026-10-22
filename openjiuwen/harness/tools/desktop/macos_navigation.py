@@ -12,7 +12,7 @@ import subprocess
 import time
 import uuid
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 if __package__:
     from .accessibility import AccessibilityTree
@@ -38,6 +38,10 @@ else:
 
 class ObservationChanged(RuntimeError):
     """Discard an unstable capture; only observation may be retried, never input."""
+
+
+class FocusRequired(RuntimeError):
+    """No shared window owns input; recoverable only before an action starts."""
 
 
 class MacOSNavigation:
@@ -67,6 +71,7 @@ class MacOSNavigation:
         self.front_pid = None
         self.focused_rect = None
         self.focus_source = ""
+        self.last_active_window_id = None
         self._capture_prepared = False
         self.typing = False
         self.typed_keys = 0
@@ -285,9 +290,12 @@ class MacOSNavigation:
                 self.desktop.monitor.record(
                     "stale_observation", expected=geometry(self.expected), actual=geometry(current)
                 )
-            raise ObservationChanged("desktop windows or focus changed; observe again before input")
+            raise ObservationChanged(
+                "desktop windows or focus changed; inspect the fresh returned observation; "
+                "observe again only if none was returned"
+            )
         if require_app and self.front_pid not in self.names:
-            raise RuntimeError("focus a permitted window before input")
+            raise FocusRequired("focus a permitted window before input; use focus with a listed window_id")
         if require_app:
             owned = [s for s in self.catalog.surfaces if s.pid == self.front_pid]
             if self.focused_rect is not None:
@@ -302,7 +310,7 @@ class MacOSNavigation:
             else:
                 scoped = False  # App foreground ownership alone is not a window grant.
             if not scoped:
-                raise RuntimeError(
+                raise FocusRequired(
                     "focused window is not shared or is outside the selected display; focus a shared window"
                 )
         self.check_secure()
@@ -528,14 +536,47 @@ class MacOSNavigation:
         return capture.capture(native_id, expected_pid=surface.pid)
 
     # Every retry returns or re-raises the last capture failure.
-    # pylint: disable-next=inconsistent-return-statements
+    # pylint: disable-next=inconsistent-return-statements,too-many-locals
     def observe(self, *, image_mode="full"):
         """Allow bounded UI animation to settle, restarting only discarded captures."""
         attempts = 0
+        settle = self.desktop.settings.observation_settle_seconds if image_mode == "full" else 0
+        started = time.monotonic()
+        deadline = started + settle
+        previous = None
+        samples = captures = 0
+        timings = {}
         while True:
             try:
-                return self._observe_once(image_mode=image_mode)
+                current = self._observe_once(image_mode=image_mode)
+                if not settle:
+                    return current
+                samples += 1
+                captures += current["performance"]["window_captures"]
+                for key, value in current["performance"].items():
+                    if key.endswith("_seconds"):
+                        timings[key] = timings.get(key, 0) + value
+                signature = (
+                    current["image_digest"],
+                    current["bounds"],
+                    current["context"]["active_window_id"],
+                    current["context"]["windows"],
+                )
+                if signature == previous or time.monotonic() >= deadline:
+                    current["performance"].update(timings)
+                    current["performance"].update(
+                        window_captures=captures,
+                        settle_samples=samples,
+                        settle_seconds=time.monotonic() - started,
+                        total_seconds=time.monotonic() - started,
+                        settled=signature == previous,
+                    )
+                    self.desktop.last = replace(self.desktop.last, performance=current["performance"])
+                    return current
+                previous = signature
+                self.desktop._inputs().pause(min(0.05, max(0, deadline - time.monotonic())))
             except ObservationChanged:
+                previous = None
                 attempts += 1
                 pending = self.dialogs.pending if self.dialogs.waiting_for_metadata else None
                 remaining = max(0, pending["deadline"] - time.monotonic()) if pending else 0
@@ -560,30 +601,6 @@ class MacOSNavigation:
         if self.dialogs.waiting_for_metadata:
             raise ObservationChanged("opening modal window metadata is not ready; no pixels captured")
         self.check_secure()
-        metadata_seconds = time.monotonic() - started
-        pixel_started = time.monotonic()
-        self._capture_prepared = False
-        captures = {}
-        for handle in self.catalog.windows if image_mode != "metadata" else ():
-            d._inputs().check_stop()
-            surface = self.catalog.resolve(handle)
-            try:
-                captures[handle] = self.capture_window(surface.native_id)
-            except (subprocess.CalledProcessError, RuntimeError) as exc:
-                if self.refresh() != before:
-                    raise ObservationChanged("window disappeared during capture; pixels discarded") from exc
-                raise
-            if self.refresh() != before:
-                raise ObservationChanged("desktop changed during capture; pixels discarded")
-        bitmap = (
-            self.catalog.compose(self.display, captures, d.settings.screenshot_max_side)
-            if image_mode != "metadata"
-            else None
-        )
-        width, height = self.catalog.image_size(self.display, d.settings.screenshot_max_side)
-        digest = hashlib.sha256(bitmap.tobytes()).hexdigest() if bitmap is not None else ""
-        pixel_seconds = time.monotonic() - pixel_started
-        d.generation += 1
         active = [
             handle
             for handle in self.catalog.windows
@@ -595,13 +612,50 @@ class MacOSNavigation:
             )
             == 1
         ]
+        active_window_id = active[0] if len(active) == 1 else None
+        if self.last_active_window_id not in self.catalog.windows:
+            self.last_active_window_id = None
+        # Losing foreground ownership must not also change the model's pixel scale.
+        crop_candidate = active_window_id or self.last_active_window_id
+        view_window_id = (
+            self.catalog.crop_window(crop_candidate)
+            if crop_candidate and d.settings.active_window_screenshots
+            else None
+        )
+        view = self.catalog.windows[view_window_id].desktop_rect if view_window_id else self.display
+        metadata_seconds = time.monotonic() - started
+        pixel_started = time.monotonic()
+        self._capture_prepared = False
+        captures = {}
+        capture_handles = (view_window_id,) if view_window_id else self.catalog.windows
+        for handle in capture_handles if image_mode != "metadata" else ():
+            d._inputs().check_stop()
+            surface = self.catalog.resolve(handle)
+            try:
+                captures[handle] = self.capture_window(surface.native_id)
+            except (subprocess.CalledProcessError, RuntimeError) as exc:
+                if self.refresh() != before:
+                    raise ObservationChanged("window disappeared during capture; pixels discarded") from exc
+                raise
+            if self.refresh() != before:
+                raise ObservationChanged("desktop changed during capture; pixels discarded")
+        bitmap = (
+            self.catalog.compose(view, captures, d.settings.screenshot_max_side, view_window_id=view_window_id)
+            if image_mode != "metadata"
+            else None
+        )
+        width, height = self.catalog.image_size(view, d.settings.screenshot_max_side)
+        digest = hashlib.sha256(bitmap.tobytes()).hexdigest() if bitmap is not None else ""
+        pixel_seconds = time.monotonic() - pixel_started
+        d.generation += 1
         context = DesktopObservationContext(
             session_id=self.scope.session_id,
             observation_id=uuid.uuid4().hex,
             display_id=self.scope.display_id,
-            geometry=ScreenshotGeometry(pixel_width=width, pixel_height=height, desktop_rect=self.display),
+            geometry=ScreenshotGeometry(pixel_width=width, pixel_height=height, desktop_rect=view),
             windows=tuple(self.catalog.windows.values()),
-            active_window_id=active[0] if len(active) == 1 else None,
+            active_window_id=active_window_id,
+            view_window_id=view_window_id,
         )
         self.scope.validate_observation(context)
         target = self.names.get(self.front_pid, "")
@@ -616,7 +670,7 @@ class MacOSNavigation:
             base64.b64encode(buffer.getvalue()).decode(),
             width,
             height,
-            tuple(self.display.model_dump().values()),
+            tuple(view.model_dump().values()),
             target,
             0,
             d.generation,
@@ -653,6 +707,8 @@ class MacOSNavigation:
         observation = Observation(**{**asdict(observation), "performance": performance})
         self.expected = before
         d.last = observation
+        if active_window_id:
+            self.last_active_window_id = active_window_id
         if getattr(d, "monitor", None):
             d.monitor.record(
                 "observation_geometry",
@@ -686,7 +742,7 @@ class MacOSNavigation:
             self.dialogs.pending = None
             try:
                 self.check(require_app=action.kind not in {"focus", "launch"} or bool(action.element_id))
-            except ObservationChanged as exc:
+            except (ObservationChanged, FocusRequired) as exc:
                 raise InputNotStarted(str(exc)) from exc
             dialog_start = self.dialogs.before_action(action)
             self.typing = action.kind == "type" and action.input_mode == "editable"

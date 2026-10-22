@@ -187,6 +187,8 @@ class DesktopSettings(StrictModel):
     capture_backend: Literal["auto", "screencapture", "screencapturekit"] = "auto"
     optimized_batches: bool = True
     compact_tool_results: bool = True
+    active_window_screenshots: bool = False
+    observation_settle_seconds: float = Field(default=0, ge=0, le=0.5)
 
     @model_validator(mode="after")
     def unique_targets(self):

@@ -119,9 +119,20 @@ class WindowCatalog:
         scale = min(1, max_side / max(display.width, display.height))
         return max(1, round(display.width * scale)), max(1, round(display.height * scale))
 
+    def crop_window(self, handle: str) -> str | None:
+        """Keep the overview when a shared sheet/window overlaps the active parent."""
+        window = self.windows[handle]
+        for surface in self.surfaces:
+            current = self.handles.get((surface.pid, surface.native_id))
+            if current == handle:
+                return handle
+            if current and intersects(surface.rect, window.desktop_rect):
+                return None
+        return None
+
     # Keep sequential native guards and cleanup visible in one operation.
     # pylint: disable-next=too-many-locals
-    def compose(self, display, captures, max_side):
+    def compose(self, display, captures, max_side, *, view_window_id=None):
         """Compose approved captures, not desktop visibility; input ownership is checked separately."""
         from PIL import Image
 
@@ -145,7 +156,7 @@ class WindowCatalog:
             )
             if box[2] <= box[0] or box[3] <= box[1]:
                 continue
-            if handle:
+            if handle and (view_window_id is None or handle == view_window_id):
                 im = captures[handle].convert("RGBA")
                 if abs(im.width / im.height - rect.width / rect.height) > 0.02:
                     raise RuntimeError("captured window aspect ratio does not match its geometry")

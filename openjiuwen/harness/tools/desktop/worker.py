@@ -503,25 +503,30 @@ class NativeDesktop:
                 self.last.point(action.x, action.y), action.button, modifiers=action.modifiers, duration=action.duration
             )
         elif action.kind == "click":
-            if action.element_id:
-                if not self.settings.accessibility_enabled or not self.accessibility:
-                    raise PermissionError("accessibility target selection is disabled")
-                if action.button == "left" and action.click_count == 1 and not action.modifiers:
+            identifier = action.element_id
+            if identifier and (not self.settings.accessibility_enabled or not self.accessibility):
+                raise PermissionError("accessibility target selection is disabled")
+            point = None if identifier else self.last.point(action.x, action.y)
+            if action.button == "left" and action.click_count == 1 and not action.modifiers:
+                if not identifier and self.settings.accessibility_enabled and self.accessibility:
+                    identifier = self.accessibility.toggle_at_point(self.last, action.x, action.y)
+                if identifier:
                     monitor = getattr(self, "monitor", None)
                     if self.accessibility.press_toggle(
-                        action.element_id,
+                        identifier,
                         self.last,
                         guard_point=self._inputs().guard_point,
                         record=monitor.record if monitor else None,
+                        point=point,
                         deadline=(
                             getattr(self, "phase_deadline", None)
                             or time.monotonic() + self.settings.budgets.action_seconds
                         ),
                     ):
                         return
-                point = self.accessibility.resolve(action.element_id, self.last)
-            else:
-                point = self.last.point(action.x, action.y)
+            if identifier:
+                # An unsupported query can still have outlived this observation.
+                point = self.accessibility.resolve(identifier, self.last, point=point)
             self._inputs().click(point, action.button, action.click_count, action.modifiers)
         elif action.kind == "drag":
             # Validate every requested point before posting the first down event.
